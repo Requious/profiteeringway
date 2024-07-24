@@ -1,5 +1,9 @@
 syntax = "proto3";
 
+enum ItemType {
+	ITEMTYPE_UNSPECIFIED = 0;
+}
 message Item {
 	int64 item_id = 1;
+	ItemType type = 2;
 }
