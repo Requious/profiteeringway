@@ -2,6 +2,22 @@ syntax = "proto3";
 
 enum ItemType {
 	ITEMTYPE_UNSPECIFIED = 0;
+	// Equipment subtypes are encoded in EquipmentType
+	EQUIPMENT = 1;
+	MATERIAL = 2;
+	MATERIA = 3;
+	FOOD = 4;
+	POTION = 5;
+}
+
+enum EquipmentType {
+	EQUIPMENTTYPE_UNSPECIFIED = 0;
+	MAINHAND = 1;
+	OFFHAND = 2;
+	HELMET = 3;
+	CHEST = 4;
+
+
 }
 message Item {
 	int64 item_id = 1;
