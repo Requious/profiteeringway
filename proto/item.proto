@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package requious.profiteeringway.v1alpha;
+
 enum ItemType {
 	ITEMTYPE_UNSPECIFIED = 0;
 	// Equipment subtypes are encoded in EquipmentType
@@ -8,18 +10,53 @@ enum ItemType {
 	MATERIA = 3;
 	FOOD = 4;
 	POTION = 5;
+	MINION = 6;
+	CRYSTAL = 7;
+	// For whatever reason, mounts fall under "Other".
+	OTHER = 99;
+}
+
+enum ItemOrigin {
+	ITEMORIGIN_UNSPECIFIED = 0;
+	CRAFTED = 1;
+	TOMES = 2;
+	SAVAGE = 3;
+	NPC_MERCHANT = 4;
 }
 
 enum EquipmentType {
 	EQUIPMENTTYPE_UNSPECIFIED = 0;
 	MAINHAND = 1;
-	OFFHAND = 2;
-	HELMET = 3;
-	CHEST = 4;
 
+	HEAD = 2;
+	BODY = 3;
+	HAND = 4;
+	LEGS = 5;
+	FEET = 6;
 
+	NECK = 7;
+	WRIST = 8;
+	RING = 9;
+
+	OFFHAND = 101;
 }
+
 message Item {
 	int64 item_id = 1;
 	ItemType type = 2;
+	ItemOrigin origin = 3;
+
+	string name = 4;
+	int64 item_level = 5;
+}
+
+
+message Ingredient {
+	int64 ingredient_id = 1;	
+	int64 quantity = 2;
+}
+
+message Recipe {
+	int64 crafted_item_id = 1;
+	repeated Ingredient ingredients = 2;
 }
