@@ -19,9 +19,20 @@ enum ItemType {
 enum ItemOrigin {
 	ITEMORIGIN_UNSPECIFIED = 0;
 	CRAFTED = 1;
-	TOMES = 2;
-	SAVAGE = 3;
-	NPC_MERCHANT = 4;
+	GIL_MERCHANT = 2;
+	// BTN/MIN gathering
+	GATHERING = 3;
+	FISHING = 4;
+	TREASURE_MAP = 5;
+	LEVE = 6;
+	QUEST = 7;
+	RETAINER = 8;
+	// Tomes, or raid books, etc.
+	SPECIAL_SHOP = 9;
+	GC_SHOP = 10;
+	FC_SHOP = 11;
+	FC_CRAFT = 12;
+	ACHIEVEMENT = 13;
 }
 
 enum EquipmentType {
@@ -34,20 +45,84 @@ enum EquipmentType {
 	LEGS = 5;
 	FEET = 6;
 
-	NECK = 7;
-	WRIST = 8;
-	RING = 9;
+	EARS = 7;
+	NECK = 8;
+	WRIST = 9;
+	RING = 10;
 
 	OFFHAND = 101;
+}
+
+enum ClassJob {
+	CLASSJOB_UNSPECIFIED = 0;
+
+	// Tanks
+	PLD = 1;
+	WAR = 2;
+	DRK = 3;
+	GNB = 4;
+
+	// Healers
+	WHM = 11;
+	SCH = 12;
+	AST = 13;
+	SGE = 14;
+
+	// Melee
+	MNK = 20;
+	DRG = 21;
+	NIN = 22;
+	SAM = 23;
+	RPR = 24;
+	VPR = 25;
+
+	// Phys ranged
+	BRD = 30;
+	MCH = 31;
+	DNC = 32;
+
+	// Caster
+	BLM = 40;
+	SMN = 41;
+	RDM = 42;
+	PCT = 43;
+
+	// Crafters
+	CRP = 50;
+	BSM = 51;
+	ARM = 52;
+	GSM = 53;
+	LTW = 54;
+	WVR = 55;
+	ALC = 56;
+	CUL = 57;
+
+	// Gatherers
+	MIN = 60;
+	BOT = 61;
+	FSH = 62;
 }
 
 message Item {
 	int64 item_id = 1;
 	ItemType type = 2;
-	ItemOrigin origin = 3;
+	repeated ItemOrigin origins = 3;
 
 	string name = 4;
 	int64 item_level = 5;
+	EquipmentType equipment_type = 6;
+
+	// For special shop items
+	int64 special_currency_item_id = 7;
+	int64 special_currency_count = 8;
+
+	bool high_qualityable = 9;
+	bool marketable = 10;
+
+	// For items sold by NPCs
+	int64 gil_price = 11;
+
+	ClassJob class_job_restriction = 12;
 }
 
 
@@ -57,6 +132,7 @@ message Ingredient {
 }
 
 message Recipe {
-	int64 crafted_item_id = 1;
-	repeated Ingredient ingredients = 2;
+	int64 recipe_id = 1;
+	int64 crafted_item_id = 2;
+	repeated Ingredient ingredients = 3;
 }
