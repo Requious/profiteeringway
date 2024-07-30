@@ -8,6 +8,8 @@ import (
 
 func main() {
 	pg, err := postgres.NewPostgres(secrets.PostgresConnectionString)
+	defer pg.CleanUp()
+
 	if err != nil {
 		fmt.Printf("failed to initialize postgres: %v\n", err)
 		return
@@ -25,4 +27,8 @@ func main() {
 	}
 
 	fmt.Printf("got item %s", name)
+
+	if err = pg.InitializePriceTables(); err != nil {
+		fmt.Printf("failed to initialize: %v", err)
+	}
 }
