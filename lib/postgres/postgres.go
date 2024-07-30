@@ -3,6 +3,7 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
+	"profiteeringway/lib/universalis"
 
 	_ "github.com/lib/pq"
 )
@@ -85,4 +86,9 @@ func (p *Postgres) InitializePriceTables() error {
 
 func (p *Postgres) CleanUp() error {
 	return p.Db.Close()
+}
+
+func (p *Postgres) WriteUniversalisPriceData(upd *universalis.UniversalisPriceData) error {
+
+	return nil
 }
