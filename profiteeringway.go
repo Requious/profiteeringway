@@ -2,12 +2,32 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"profiteeringway/lib/hotlist"
 	"profiteeringway/lib/postgres"
-	"profiteeringway/lib/universalis"
 	"profiteeringway/secrets"
+	"syscall"
+	"time"
 )
 
+func MakeHotlist(worldIDs []int, itemIDs []int, name string) *hotlist.Hotlist {
+	fifteenMinutes, err := time.ParseDuration("15m")
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse duration: %s", err))
+	}
+
+	return &hotlist.Hotlist{
+		Name:          name,
+		ItemIDs:       itemIDs,
+		PollFrequency: fifteenMinutes,
+		WorldIDs:      worldIDs,
+	}
+}
+
 func main() {
+	var hotlists []*hotlist.Hotlist
+
 	pg, err := postgres.NewPostgres(secrets.PostgresConnectionString)
 	defer pg.CleanUp()
 
@@ -16,28 +36,13 @@ func main() {
 		return
 	}
 
-	item, err := pg.SelectItemWithID(31831)
-	if err != nil {
-		fmt.Printf("failed to retrieve item: %v\n", err)
-		return
+	hub := hotlist.NewHotlistHub(pg)
+
+	sigStopChan := make(chan os.Signal, 1)
+	signal.Notify(sigStopChan, syscall.SIGTSTP)
+	for {
+		<-sigStopChan
+		hub.CleanUp()
+		break
 	}
-
-	name, err := item.Name.Value()
-	if err != nil {
-		fmt.Printf("failed to scan name from item: %v\n", err)
-	}
-
-	fmt.Printf("got item %s", name)
-
-	if err = pg.InitializePriceTables(); err != nil {
-		fmt.Printf("failed to initialize: %v", err)
-	}
-
-	priceData, err := universalis.GetItemData(54, []int{42892, 42893})
-	if err != nil {
-		fmt.Printf("failed to get Universalis data: %v", err)
-		return
-	}
-
-	fmt.Printf("%+v\n", priceData)
 }

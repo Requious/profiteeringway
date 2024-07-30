@@ -124,7 +124,7 @@ func (h *HotlistHub) BeginPollingAll() error {
 							sb.WriteString(fmt.Sprintf("error postgres rate limiting %s", err))
 							continue
 						}
-						if err := h.pg.WriteUniversalisPriceData(marketData); err != nil {
+						if err := h.pg.WriteUniversalisPriceData(ctx, marketData); err != nil {
 							sb.WriteString(fmt.Sprintf("error writing to postgres %s", err))
 							continue
 						}

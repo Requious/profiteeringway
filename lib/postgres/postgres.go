@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"profiteeringway/lib/universalis"
@@ -88,7 +89,131 @@ func (p *Postgres) CleanUp() error {
 	return p.Db.Close()
 }
 
-func (p *Postgres) WriteUniversalisPriceData(upd *universalis.UniversalisPriceData) error {
+/*
+prices
 
+	price_id bigserial PRIMARY KEY,
+	item_id integer REFERENCES items ON DELETE CASCADE NOT NULL,
+	world_id integer REFERENCES worlds ON DELETE RESTRICT NOT NULL,
+	update_time timestamp without time zone NOT NULL,
+	nq_sale_velocity integer NOT NULL,
+	hq_sale_velocity integer NOT NULL,
+	min_price_nq integer NOT NULL,
+	min_price_hq integer NOT NULL
+
+listings
+
+	listing_id bigserial PRIMARY KEY,
+	price_id integer REFERENCES prices ON DELETE CASCADE NOT NULL,
+	price_per_unit integer NOT NULL,
+	quantity integer NOT NULL,
+	high_quality boolean NOT NULL
+*/
+
+func checkPositive(nums []int) bool {
+	for _, num := range nums {
+		if num <= 0 {
+			return false
+		}
+	}
+	return true
+}
+func (p *Postgres) WriteUniversalisPriceData(ctx context.Context, upd *universalis.UniversalisPriceData) error {
+	successCount := 0
+	for _, priceData := range upd.Items {
+		// Check in case it's garbage
+		positive := checkPositive([]int{priceData.ItemID, priceData.WorldID, priceData.MinPriceHQ, priceData.MinPriceNQ})
+		if !positive {
+			fmt.Printf("unexpected negative values found: %+v", priceData)
+			continue
+		}
+		rows, err := p.Db.QueryContext(ctx, `INSERT INTO prices
+(item_id, world_id, update_time, nq_sale_velocity, hq_sale_velocity, min_price_nq, min_price_hq)
+VALUES ($1, $2, $3, $4, $5, $6, $7) 
+RETURNING price_id;`, priceData.ItemID, priceData.WorldID, priceData.LastUploadTime, priceData.NqSaleVelocity, priceData.HqSaleVelocity, priceData.MinPriceNQ, priceData.MinPriceHQ)
+
+		if err != nil {
+			fmt.Printf("failed to write price: %s", err)
+			continue
+		}
+
+		successCount += 1
+
+		var priceID int
+		for rows.Next() {
+			if err := rows.Scan(&priceID); err != nil {
+				fmt.Printf("failed to scan price_id out of insert command: %s", err)
+				continue
+			}
+		}
+
+		for _, l := range priceData.Listings {
+			_, err := p.Db.ExecContext(ctx, `INSERT INTO listings (price_id, price_per_unit, quantity, high_quality) VALUES ($1, $2, $3, $4)`,
+				priceID, l.PricePerUnit, l.Quantity, l.Hq)
+			if err != nil {
+				fmt.Printf("failed to write listing: %s", err)
+				continue
+			}
+			successCount += 1
+		}
+	}
+
+	if successCount == 0 {
+		return fmt.Errorf("all writes failed, see logs")
+	}
 	return nil
 }
+
+func (p *Postgres) NorthAmericanWorlds() ([]int, error) {
+	rows, err := p.Db.Query(`SELECT world_id FROM worlds WHERE datacenter IN ('Aether', 'Primal', 'Crystal', 'Dynamis') AND is_public;`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get NA worlds: %w", err)
+	}
+
+	var worldIDs []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal data for world id: %w", err)
+		}
+		worldIDs = append(worldIDs, id)
+	}
+	return worldIDs, nil
+}
+
+func (p *Postgres) GetItemIDsForStaticQuery(query string) ([]int, error) {
+	rows, err := p.Db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get NA worlds: %w", err)
+	}
+
+	var itemIDs []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal data for world id: %w", err)
+		}
+		itemIDs = append(itemIDs, id)
+	}
+	return itemIDs, nil
+}
+
+func (p *Postgres) DawntrailMateriaIDs() ([]int, error) {
+	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Materia') AND item_level > 650;`)
+}
+
+func (p *Postgres) DawntrailConsumables() ([]int, error) {
+	return p.GetItemIDsForStaticQuery(`SELECT name FROM items WHERE type IN ('Meal', 'Medicine') AND item_level > 700;`)
+}
+
+func (p *Postgres) DawntrailTierOneCraftedEquipment() ([]int, error) {
+	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Marauder''s Arm','Two–handed Thaumaturge''s Arm','Weaver''s Primary Tool','Goldsmith''s Secondary Tool','Botanist''s Secondary Tool','Astrologian''s Arm','Fisher''s Primary Tool','Alchemist''s Primary Tool','Archer''s Arm','One–handed Conjurer''s Arm','Blacksmith''s Primary Tool','Arcanist''s Grimoire','Goldsmith''s Primary Tool','Alchemist''s Secondary Tool','Gladiator''s Arm','Red Mage''s Arm','Leatherworker''s Primary Tool','Scholar''s Arm','Earrings','Sage''s Arm','Blue Mage''s Arm','Rogue''s Arm','Blacksmith''s Secondary Tool','Culinarian''s Primary Tool','Reaper''s Arm','Miner''s Secondary Tool','Botanist''s Primary Tool','Culinarian''s Secondary Tool','Weaver''s Secondary Tool','Dancer''s Arm','Carpenter''s Secondary Tool','Armorer''s Primary Tool','Carpenter''s Primary Tool','Two–handed Conjurer''s Arm','Armorer''s Secondary Tool','One–handed Thaumaturge''s Arm','Dark Knight''s Arm','Miner''s Primary Tool','Samurai''s Arm','Shield','Fisher''s Secondary Tool','Machinist''s Arm','Hands','Body','Head','Necklace','Ring','Legs','Feet','Bracelets','Leatherworker''s Secondary Tool','Pugilist''s Arm','Lancer''s Arm','Pictomancer''s Arm','Viper''s Arm','Gunbreaker''s Arm') AND item_level > 709 AND marketable`)
+}
+
+/*
+'Reagent','Ingredient','Cloth','Seafood','Crystal'
+
+split to avoid 100+
+
+'Metal','Bone','Leather','Stone','Lumber'
+*/
