@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"profiteeringway/lib/postgres"
+	"profiteeringway/lib/universalis"
 	"profiteeringway/secrets"
 )
 
@@ -31,4 +32,12 @@ func main() {
 	if err = pg.InitializePriceTables(); err != nil {
 		fmt.Printf("failed to initialize: %v", err)
 	}
+
+	priceData, err := universalis.GetItemData()
+	if err != nil {
+		fmt.Printf("failed to get Universalis data: %v", err)
+		return
+	}
+
+	fmt.Printf("%+v\n", priceData)
 }
