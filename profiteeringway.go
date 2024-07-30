@@ -33,7 +33,7 @@ func main() {
 		fmt.Printf("failed to initialize: %v", err)
 	}
 
-	priceData, err := universalis.GetItemData()
+	priceData, err := universalis.GetItemData(54, []int{42892, 42893})
 	if err != nil {
 		fmt.Printf("failed to get Universalis data: %v", err)
 		return

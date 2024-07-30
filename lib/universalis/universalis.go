@@ -5,9 +5,26 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 )
 
-type Universalis struct {
+const universalisBaseAPIUrl = "https://universalis.app/api/v2"
+
+func fieldFilters() []string {
+	return []string{
+		"items.minPriceNQ",
+		"items.minPriceHQ",
+		"items.nqSaleVelocity",
+		"items.hqSaleVelocity",
+		"items.listings.pricePerUnit",
+		"items.listings.quantity",
+		"items.listings.hq",
+		"items.lastUploadTime",
+		"items.itemID",
+		"items.worldID",
+	}
 }
 
 type UniversalisPriceData struct {
@@ -27,8 +44,34 @@ type UniversalisPriceData struct {
 	} `json:"items"`
 }
 
-func GetItemData() (*UniversalisPriceData, error) {
-	resp, err := http.Get(`https://universalis.app/api/v2/57/44001,42458?fields=items.minPriceNQ,items.minPriceHQ,items.nqSaleVelocity,items.hqSaleVelocity, items.listings.pricePerUnit, items.listings.quantity,items.lastUploadTime,items.itemID,items.worldID, items.listings.hq&entriesWithin=86400&statsWithin=86400000`)
+func GetItemData(worldID int, itemIDs []int) (*UniversalisPriceData, error) {
+	endpointUrl, err := url.Parse(universalisBaseAPIUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Universalis URL: %w", err)
+	}
+
+	var stringItemIDs []string
+
+	for _, id := range itemIDs {
+		stringItemIDs = append(stringItemIDs, strconv.Itoa(id))
+	}
+
+	itemIDsJoined := strings.Join(stringItemIDs, ",")
+
+	endpointUrl = endpointUrl.JoinPath(strconv.Itoa(worldID), itemIDsJoined)
+	q := endpointUrl.Query()
+	q.Set("entriesWithin", "36000")
+	q.Set("statsWithin", "86400000")
+	q.Set("fields", strings.Join(fieldFilters(), ","))
+
+	endpointUrl.RawQuery = q.Encode()
+
+	finalizedUrl, err := url.PathUnescape(endpointUrl.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to unescape constructed url: %w", err)
+	}
+
+	resp, err := http.Get(finalizedUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item from Universalis: %w", err)
 	}
@@ -41,7 +84,7 @@ func GetItemData() (*UniversalisPriceData, error) {
 	}
 	err = json.Unmarshal(body, priceData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal json response from Universalis: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal json response to %s from Universalis: %w", endpointUrl.String(), err)
 	}
 	return priceData, nil
 }
