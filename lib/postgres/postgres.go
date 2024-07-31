@@ -219,5 +219,125 @@ func (p *Postgres) DawntrailMaterialsSetOne() ([]int, error) {
 
 // We split these up to stay below the 100 item threshold for Universalis data.
 func (p *Postgres) DawntrailMaterialsSetTwo() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Leather','Cloth') AND item_level > 700;`)
+	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Leather','Cloth') AND item_level > 679;`)
+}
+
+type PriceRow struct {
+	Name       string
+	WorldName  string
+	MinPriceHQ int
+	MinPriceNQ int
+}
+
+func (p *Postgres) GetItemPricesFromItemID(ctx context.Context, itemID int) ([]*PriceRow, error) {
+	rows, err := p.Db.QueryContext(ctx, `SELECT
+	name,
+	world_name,
+	MIN(overall_min_price_hq) AS min_price_hq,
+	MIN(overall_min_price_nq) AS min_price_nq
+FROM
+(SELECT
+	items.name,
+	price_world.world_name,
+	MIN(price_world.min_price_hq) OVER (PARTITION BY price_world.world_name) AS overall_min_price_hq,
+	MIN(price_world.min_price_nq) OVER (PARTITION BY price_world.world_name) AS overall_min_price_nq,
+	rank() OVER (PARTITION BY price_world.update_time ORDER BY price_world.update_time DESC) AS recency_rank
+FROM
+	items RIGHT JOIN (
+		SELECT
+			prices.item_id,
+			worlds.name AS world_name,
+			prices.min_price_hq,
+			prices.min_price_nq,
+			prices.update_time
+		FROM
+			prices INNER JOIN worlds USING (world_id)
+		WHERE
+			prices.min_price_hq <> 0
+	) price_world USING (item_id)
+WHERE
+	items.item_id = ($1)
+)
+WHERE
+	recency_rank = 1
+GROUP BY
+	name, world_name
+ORDER BY 
+	min_price_hq;`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("Postgres error: %s", err)
+	}
+
+	var prices []*PriceRow
+	for rows.Next() {
+		var minPriceHQ, minPriceNQ int
+		var name, worldName string
+		if err := rows.Scan(&name, &worldName, &minPriceHQ, &minPriceNQ); err != nil {
+			return nil, fmt.Errorf("Failed to scan values out of SQL row: %w", err)
+		}
+		prices = append(prices, &PriceRow{
+			Name:       name,
+			WorldName:  worldName,
+			MinPriceHQ: minPriceHQ,
+			MinPriceNQ: minPriceNQ,
+		})
+	}
+	return prices, nil
+}
+
+// Reminder this is case insensitive lookup with UPPER(name) = UPPER(db.name)
+func (p *Postgres) GetItemPricesFromItemName(ctx context.Context, itemName string) ([]*PriceRow, error) {
+	rows, err := p.Db.QueryContext(ctx, `SELECT
+	name,
+	world_name,
+	MIN(overall_min_price_hq) AS min_price_hq,
+	MIN(overall_min_price_nq) AS min_price_nq
+FROM
+(SELECT
+	items.name,
+	price_world.world_name,
+	MIN(price_world.min_price_hq) OVER (PARTITION BY price_world.world_name) AS overall_min_price_hq,
+	MIN(price_world.min_price_nq) OVER (PARTITION BY price_world.world_name) AS overall_min_price_nq,
+	rank() OVER (PARTITION BY price_world.update_time ORDER BY price_world.update_time DESC) AS recency_rank
+FROM
+	items RIGHT JOIN (
+		SELECT
+			prices.item_id,
+			worlds.name AS world_name,
+			prices.min_price_hq,
+			prices.min_price_nq,
+			prices.update_time
+		FROM
+			prices INNER JOIN worlds USING (world_id)
+		WHERE
+			prices.min_price_hq <> 0
+	) price_world USING (item_id)
+WHERE
+	UPPER(items.name) = UPPER(($1))
+)
+WHERE
+	recency_rank = 1
+GROUP BY
+	name, world_name
+ORDER BY 
+	min_price_hq;`, itemName)
+	if err != nil {
+		return nil, fmt.Errorf("Postgres error: %s", err)
+	}
+
+	var prices []*PriceRow
+	for rows.Next() {
+		var minPriceHQ, minPriceNQ int
+		var name, worldName string
+		if err := rows.Scan(&name, &worldName, &minPriceHQ, &minPriceNQ); err != nil {
+			return nil, fmt.Errorf("Failed to scan values out of SQL row: %w", err)
+		}
+		prices = append(prices, &PriceRow{
+			Name:       name,
+			WorldName:  worldName,
+			MinPriceHQ: minPriceHQ,
+			MinPriceNQ: minPriceNQ,
+		})
+	}
+	return prices, nil
 }
