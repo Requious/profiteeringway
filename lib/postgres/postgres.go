@@ -7,6 +7,7 @@ import (
 	"profiteeringway/lib/universalis"
 
 	_ "github.com/lib/pq"
+	"go.uber.org/zap"
 )
 
 const initializePriceTables = `CREATE TABLE IF NOT EXISTS prices (
@@ -29,16 +30,18 @@ CREATE TABLE IF NOT EXISTS listings (
 );`
 
 type Postgres struct {
-	Db *sql.DB
+	Db     *sql.DB
+	logger *zap.SugaredLogger
 }
 
-func NewPostgres(connStr string) (*Postgres, error) {
+func NewPostgres(connStr string, logger *zap.SugaredLogger) (*Postgres, error) {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Postgres connection: %s", err)
 	}
 	return &Postgres{
-		Db: db,
+		Db:     db,
+		logger: logger,
 	}, nil
 }
 
@@ -122,18 +125,18 @@ func (p *Postgres) WriteUniversalisPriceData(ctx context.Context, upd *universal
 	successCount := 0
 	for _, priceData := range upd.Items {
 		// Check in case it's garbage
-		positive := checkPositive([]int{priceData.ItemID, priceData.WorldID, priceData.MinPriceHQ, priceData.MinPriceNQ})
+		positive := checkPositive([]int{priceData.ItemID, priceData.WorldID})
 		if !positive {
-			fmt.Printf("unexpected negative values found: %+v", priceData)
+			p.logger.Warnf("unexpected negative values found: %+v", priceData)
 			continue
 		}
 		rows, err := p.Db.QueryContext(ctx, `INSERT INTO prices
 (item_id, world_id, update_time, nq_sale_velocity, hq_sale_velocity, min_price_nq, min_price_hq)
-VALUES ($1, $2, $3, $4, $5, $6, $7) 
+VALUES ($1, $2, to_timestamp($3::double precision/1000), $4, $5, $6, $7) 
 RETURNING price_id;`, priceData.ItemID, priceData.WorldID, priceData.LastUploadTime, priceData.NqSaleVelocity, priceData.HqSaleVelocity, priceData.MinPriceNQ, priceData.MinPriceHQ)
 
 		if err != nil {
-			fmt.Printf("failed to write price: %s", err)
+			p.logger.Errorf("failed to write price: %s", err)
 			continue
 		}
 
@@ -142,7 +145,7 @@ RETURNING price_id;`, priceData.ItemID, priceData.WorldID, priceData.LastUploadT
 		var priceID int
 		for rows.Next() {
 			if err := rows.Scan(&priceID); err != nil {
-				fmt.Printf("failed to scan price_id out of insert command: %s", err)
+				p.logger.Errorf("failed to scan price_id out of insert command: %s", err)
 				continue
 			}
 		}
@@ -151,7 +154,7 @@ RETURNING price_id;`, priceData.ItemID, priceData.WorldID, priceData.LastUploadT
 			_, err := p.Db.ExecContext(ctx, `INSERT INTO listings (price_id, price_per_unit, quantity, high_quality) VALUES ($1, $2, $3, $4)`,
 				priceID, l.PricePerUnit, l.Quantity, l.Hq)
 			if err != nil {
-				fmt.Printf("failed to write listing: %s", err)
+				p.logger.Errorf("failed to write listing: %s", err)
 				continue
 			}
 			successCount += 1
@@ -203,7 +206,7 @@ func (p *Postgres) DawntrailMateriaIDs() ([]int, error) {
 }
 
 func (p *Postgres) DawntrailConsumables() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT name FROM items WHERE type IN ('Meal', 'Medicine') AND item_level > 700;`)
+	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Meal', 'Medicine') AND item_level > 700;`)
 }
 
 func (p *Postgres) DawntrailTierOneCraftedEquipment() ([]int, error) {
@@ -216,5 +219,5 @@ func (p *Postgres) DawntrailMaterialsSetOne() ([]int, error) {
 
 // We split these up to stay below the 100 item threshold for Universalis data.
 func (p *Postgres) DawntrailMaterialsSetTwo() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT name FROM items WHERE type IN ('Leather','Cloth') AND item_level > 700;`)
+	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Leather','Cloth') AND item_level > 700;`)
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -27,6 +28,7 @@ type HotlistHub struct {
 	universalisLimiter *rate.Limiter
 	postgresLimiter    *rate.Limiter
 	pg                 *postgres.Postgres
+	logger             *zap.SugaredLogger
 }
 
 type timerResult struct {
@@ -35,7 +37,7 @@ type timerResult struct {
 	err     error
 }
 
-func NewHotlistHub(db *postgres.Postgres) *HotlistHub {
+func NewHotlistHub(db *postgres.Postgres, logger *zap.SugaredLogger) *HotlistHub {
 	cleanupChan := make(chan struct{})
 	resultChan := make(chan *timerResult)
 
@@ -56,11 +58,11 @@ func NewHotlistHub(db *postgres.Postgres) *HotlistHub {
 			select {
 			case result = <-resultChan:
 				if result.err != nil {
-					fmt.Printf("failed to poll with error %s: %s", result.message, result.err)
+					logger.Warnf("failed to poll with error %s: %s", result.message, result.err)
 				} else if !result.success {
-					fmt.Printf("failed to poll with details %s", result.message)
+					logger.Warnf("failed to poll with details %s", result.message)
 				} else {
-					fmt.Printf("successfully polled %s", result.message)
+					logger.Infof("successfully polled %s", result.message)
 				}
 			case <-cleanupChan:
 				for {
@@ -82,6 +84,7 @@ func NewHotlistHub(db *postgres.Postgres) *HotlistHub {
 		universalisLimiter: l,
 		postgresLimiter:    pgl,
 		pg:                 db,
+		logger:             logger,
 	}
 }
 

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"profiteeringway/lib/hotlist"
@@ -9,6 +11,8 @@ import (
 	"profiteeringway/secrets"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -84,9 +88,18 @@ func dawntrailTierOneHotlists(p *postgres.Postgres) ([]*hotlist.Hotlist, error) 
 }
 
 func main() {
+	botOnly := flag.Bool("bot_only", false, "set this to disable all polling behavior")
+
+	logger, err := zap.NewProduction()
+	if err != nil {
+		log.Fatalf("can't initialize zap logger: %v", err)
+	}
+	defer logger.Sync()
+	sugar := logger.Sugar()
+
 	var hotlists []*hotlist.Hotlist
 
-	pg, err := postgres.NewPostgres(secrets.PostgresConnectionString)
+	pg, err := postgres.NewPostgres(secrets.PostgresConnectionString, sugar)
 	defer pg.CleanUp()
 
 	if err != nil {
@@ -94,7 +107,7 @@ func main() {
 		return
 	}
 
-	hub := hotlist.NewHotlistHub(pg)
+	hub := hotlist.NewHotlistHub(pg, sugar)
 
 	hotlists, err = dawntrailTierOneHotlists(pg)
 	if err != nil {
@@ -106,8 +119,10 @@ func main() {
 		hub.ConfiguredHotlists[hotlist.Name] = hotlist
 	}
 
-	if err := hub.BeginPollingAll(); err != nil {
-		panic(fmt.Sprintf("%s", err))
+	if !*botOnly {
+		if err := hub.BeginPollingAll(); err != nil {
+			panic(fmt.Sprintf("%s", err))
+		}
 	}
 
 	sigStopChan := make(chan os.Signal, 1)
