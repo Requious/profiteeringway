@@ -25,6 +25,7 @@ const (
 	HotlistDawntrailTierOneCraftedEquipment = "Dawntrail Tier One Crafted Equipment"
 	HotlistDawntrailMaterialsSetOne         = "Dawntrail Materials (Set One)"
 	HotlistDawntrailMaterialsSetTwo         = "Dawntrail Materials (Set Two)"
+	HotlistCrystals                         = "Crystals"
 )
 
 func loggerInit(production bool) (*zap.Logger, zap.AtomicLevel, error) {
@@ -122,18 +123,26 @@ func dawntrailTierOneHotlists(p *postgres.Postgres) ([]*hotlist.Hotlist, error) 
 		return nil, fmt.Errorf("%w", err)
 	}
 
+	crystalIDs, err := p.AllCrystals()
+	if err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+
 	ret = append(ret, makeHotlist(copyIntSlice(worldIDs), materiaIDs, HotlistDawntrailMateria))
 	ret = append(ret, makeHotlist(copyIntSlice(worldIDs), consumableIDs, HotlistDawntrailConsumables))
 	ret = append(ret, makeHotlist(copyIntSlice(worldIDs), craftedIDs, HotlistDawntrailTierOneCraftedEquipment))
 	ret = append(ret, makeHotlist(copyIntSlice(worldIDs), materialsOneID, HotlistDawntrailMaterialsSetOne))
 	ret = append(ret, makeHotlist(copyIntSlice(worldIDs), materialsTwoID, HotlistDawntrailMaterialsSetTwo))
+	ret = append(ret, makeHotlist(copyIntSlice(worldIDs), crystalIDs, HotlistCrystals))
 
 	return ret, nil
 }
 
 func main() {
-	botOnly := flag.Bool("bot_only", false, "set this to disable all polling behavior")
+	bot := flag.Bool("bot", false, "set this to enable bot behavior")
+	polling := flag.Bool("polling", false, "set this enable polling behavior")
 	production := flag.Bool("production", false, "set this to go to production mode")
+	flag.Parse()
 
 	logger, _, err := loggerInit(*production)
 	if err != nil {
@@ -142,12 +151,13 @@ func main() {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 
-	// Universalis polling
-	var hotlists []*hotlist.Hotlist
+	sugar.Infow("process init:",
+		"bot", *bot,
+		"polling", *polling,
+		"production", *production)
 
 	pg, err := postgres.NewPostgres(secrets.PostgresConnectionString, sugar)
 	defer pg.CleanUp()
-
 	if err != nil {
 		fmt.Printf("failed to initialize postgres: %v\n", err)
 		return
@@ -155,32 +165,35 @@ func main() {
 
 	hub := hotlist.NewHotlistHub(pg, sugar)
 
-	hotlists, err = dawntrailTierOneHotlists(pg)
-	if err != nil {
-		panic(fmt.Sprintf("%s", err))
-	}
+	// Universalis polling
+	if *polling {
+		var hotlists []*hotlist.Hotlist
+		hotlists, err = dawntrailTierOneHotlists(pg)
+		if err != nil {
+			panic(fmt.Sprintf("%s", err))
+		}
 
-	hub.ConfiguredHotlists = make(map[string]*hotlist.Hotlist)
-	for _, hotlist := range hotlists {
-		hub.ConfiguredHotlists[hotlist.Name] = hotlist
-	}
-
-	if !*botOnly {
+		hub.ConfiguredHotlists = make(map[string]*hotlist.Hotlist)
+		for _, hotlist := range hotlists {
+			hub.ConfiguredHotlists[hotlist.Name] = hotlist
+		}
 		if err := hub.BeginPollingAll(); err != nil {
 			panic(fmt.Sprintf("%s", err))
 		}
 	}
 
 	// Discord setup
-	sess, err := discordgo.New(fmt.Sprintf("Bot %s", secrets.DiscordBotToken))
-	if err != nil {
-		panic(fmt.Sprintf("failed to connect to Discord: %s", err))
+	if *bot {
+		sess, err := discordgo.New(fmt.Sprintf("Bot %s", secrets.DiscordBotToken))
+		if err != nil {
+			panic(fmt.Sprintf("failed to connect to Discord: %s", err))
+		}
+		discord := discord.NewDiscord(sess, sugar, pg)
+		if err := discord.Initialize(); err != nil {
+			panic(fmt.Sprintf("failed to initialize Discord bot user connection: %s", err))
+		}
+		defer discord.CleanUp()
 	}
-	discord := discord.NewDiscord(sess, sugar, pg)
-	if err := discord.Initialize(); err != nil {
-		panic(fmt.Sprintf("failed to initialize Discord bot user connection: %s", err))
-	}
-	defer discord.CleanUp()
 
 	sigStopChan := make(chan os.Signal, 1)
 	signal.Notify(sigStopChan, syscall.SIGTSTP)

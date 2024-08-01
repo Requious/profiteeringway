@@ -288,7 +288,7 @@ func CommandLookup() *discordgo.ApplicationCommand {
 	}
 }
 
-func tabularPrint(rows []*postgres.PriceRow) (string, string) {
+func tabularPrintHQ(rows []*postgres.HQPriceRow) (string, string) {
 	t := table.NewWriter()
 	var itemName string
 
@@ -306,6 +306,86 @@ func tabularPrint(rows []*postgres.PriceRow) (string, string) {
 	return itemName, t.Render()
 }
 
+func tabularPrintNQ(rows []*postgres.NQPriceRow) (string, string) {
+	t := table.NewWriter()
+	var itemName string
+
+	t.AppendHeader(table.Row{"World", "Minimum Price (NQ)"})
+	for _, row := range rows {
+		if itemName == "" {
+			itemName = row.Name
+		}
+		t.AppendRow(table.Row{
+			row.WorldName,
+			row.MinPriceNQ,
+		})
+	}
+	return itemName, t.Render()
+}
+
+type expensivePriceTableRow struct {
+	worldName  string
+	datacenter string
+	minPriceHQ int
+	minPriceNQ int
+}
+
+func tabularPrintExpensive(priceRows []*postgres.AllWorldsPriceRowExpensive) (string, string) {
+	itemName := ""
+
+	// We'll do some finicky stuff to preserve sort order from the query.
+	// Run through the slice twice, once HQ only and once NQ only; on the NQ run
+	// check if we've already seen the worldName, if so, append the NQ price.
+	var printRows []*expensivePriceTableRow
+	for _, row := range priceRows {
+		if itemName == "" {
+			itemName = row.Name
+		}
+		if !row.HighQuality {
+			continue
+		}
+		printRows = append(printRows, &expensivePriceTableRow{
+			worldName:  row.WorldName,
+			datacenter: row.Datacenter,
+			minPriceHQ: row.MinPrice,
+		})
+	}
+
+	for _, row := range priceRows {
+		if row.HighQuality {
+			continue
+		}
+		found := false
+		for _, printRow := range printRows {
+			if printRow.worldName == row.WorldName {
+				found = true
+
+				printRow.minPriceNQ = row.MinPrice
+			}
+		}
+		if found {
+			continue
+		}
+		printRows = append(printRows, &expensivePriceTableRow{
+			worldName:  row.WorldName,
+			datacenter: row.Datacenter,
+			minPriceNQ: row.MinPrice,
+		})
+	}
+
+	t := table.NewWriter()
+
+	t.AppendHeader(table.Row{"Datacenter", "World", "Price per unit (HQ)", "Price per unit (NQ)"})
+	for _, pr := range printRows {
+		t.AppendRow(table.Row{
+			pr.datacenter,
+			pr.worldName,
+			pr.minPriceHQ,
+			pr.minPriceNQ,
+		})
+	}
+	return itemName, t.Render()
+}
 func (dc *Discord) handleLookup(ctx context.Context, ic *discordgo.InteractionCreate) {
 	commandData := ic.ApplicationCommandData()
 	var itemID int
@@ -329,12 +409,13 @@ func (dc *Discord) handleLookup(ctx context.Context, ic *discordgo.InteractionCr
 		return
 	}
 
-	var priceData []*postgres.PriceRow
+	var hqPriceData []*postgres.HQPriceRow
+	var nqPriceData []*postgres.NQPriceRow
 	var err error
 	if itemID > 0 {
-		priceData, err = dc.pg.GetItemPricesFromItemID(ctx, itemID)
+		hqPriceData, err = dc.pg.GetItemPricesFromItemID(ctx, itemID)
 	} else {
-		priceData, err = dc.pg.GetItemPricesFromItemName(ctx, itemName)
+		hqPriceData, err = dc.pg.GetItemPricesFromItemName(ctx, itemName)
 	}
 	if err != nil {
 		dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to get item prices"),
@@ -344,10 +425,32 @@ func (dc *Discord) handleLookup(ctx context.Context, ic *discordgo.InteractionCr
 		return
 	}
 
-	if len(priceData) == 0 {
-		dc.respondInstant(ctx, ic, "No items were found with that lookup.")
+	if len(hqPriceData) == 0 {
+		// It's possible this item has no HQ variant, so check the NQ only lookup.
+		if itemID > 0 {
+			nqPriceData, err = dc.pg.GetNQItemPricesFromItemID(ctx, itemID)
+		} else {
+			nqPriceData, err = dc.pg.GetNQItemPricesFromItemName(ctx, itemName)
+		}
+		if err != nil {
+			dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to get item prices"),
+				"command_name", commandData.Name,
+				"database_error", err)
+			dc.respondInstant(ctx, ic, "A database lookup error has occurred. Tell Req to check the logs.")
+			return
+		}
+		if len(nqPriceData) == 0 {
+			// Now we're pretty sure the item can't be found.
+			dc.respondInstant(ctx, ic, "No items were found with that lookup.")
+			return
+		}
 	}
 
-	itemName, table := tabularPrint(priceData)
+	var table string
+	if len(hqPriceData) > 0 {
+		itemName, table = tabularPrintHQ(hqPriceData)
+	} else {
+		itemName, table = tabularPrintNQ(nqPriceData)
+	}
 	dc.respondTextFile(ctx, ic, fmt.Sprintf("Price data for %s:", itemName), table)
 }

@@ -61,7 +61,7 @@ func GetItemData(worldID int, itemIDs []int) (*UniversalisPriceData, error) {
 	endpointUrl = endpointUrl.JoinPath(strconv.Itoa(worldID), itemIDsJoined)
 	q := endpointUrl.Query()
 	q.Set("entriesWithin", "36000")
-	q.Set("statsWithin", "86400000")
+	q.Set("statsWithin", "36000000")
 	q.Set("fields", strings.Join(fieldFilters(), ","))
 
 	endpointUrl.RawQuery = q.Encode()

@@ -201,35 +201,20 @@ func (p *Postgres) GetItemIDsForStaticQuery(query string) ([]int, error) {
 	return itemIDs, nil
 }
 
-func (p *Postgres) DawntrailMateriaIDs() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Materia') AND item_level > 650;`)
-}
-
-func (p *Postgres) DawntrailConsumables() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Meal', 'Medicine') AND item_level > 700;`)
-}
-
-func (p *Postgres) DawntrailTierOneCraftedEquipment() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Marauder''s Arm','Two–handed Thaumaturge''s Arm','Weaver''s Primary Tool','Goldsmith''s Secondary Tool','Botanist''s Secondary Tool','Astrologian''s Arm','Fisher''s Primary Tool','Alchemist''s Primary Tool','Archer''s Arm','One–handed Conjurer''s Arm','Blacksmith''s Primary Tool','Arcanist''s Grimoire','Goldsmith''s Primary Tool','Alchemist''s Secondary Tool','Gladiator''s Arm','Red Mage''s Arm','Leatherworker''s Primary Tool','Scholar''s Arm','Earrings','Sage''s Arm','Blue Mage''s Arm','Rogue''s Arm','Blacksmith''s Secondary Tool','Culinarian''s Primary Tool','Reaper''s Arm','Miner''s Secondary Tool','Botanist''s Primary Tool','Culinarian''s Secondary Tool','Weaver''s Secondary Tool','Dancer''s Arm','Carpenter''s Secondary Tool','Armorer''s Primary Tool','Carpenter''s Primary Tool','Two–handed Conjurer''s Arm','Armorer''s Secondary Tool','One–handed Thaumaturge''s Arm','Dark Knight''s Arm','Miner''s Primary Tool','Samurai''s Arm','Shield','Fisher''s Secondary Tool','Machinist''s Arm','Hands','Body','Head','Necklace','Ring','Legs','Feet','Bracelets','Leatherworker''s Secondary Tool','Pugilist''s Arm','Lancer''s Arm','Pictomancer''s Arm','Viper''s Arm','Gunbreaker''s Arm') AND item_level > 709 AND marketable`)
-}
-
-func (p *Postgres) DawntrailMaterialsSetOne() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Reagent','Ingredient','Seafood','Crystal','Metal','Stone','Lumber','Bone') AND item_level > 679 AND marketable;`)
-}
-
-// We split these up to stay below the 100 item threshold for Universalis data.
-func (p *Postgres) DawntrailMaterialsSetTwo() ([]int, error) {
-	return p.GetItemIDsForStaticQuery(`SELECT item_id FROM items WHERE type IN ('Leather','Cloth') AND item_level > 679;`)
-}
-
-type PriceRow struct {
+type HQPriceRow struct {
 	Name       string
 	WorldName  string
 	MinPriceHQ int
 	MinPriceNQ int
 }
 
-func (p *Postgres) GetItemPricesFromItemID(ctx context.Context, itemID int) ([]*PriceRow, error) {
+type NQPriceRow struct {
+	Name       string
+	WorldName  string
+	MinPriceNQ int
+}
+
+func (p *Postgres) GetItemPricesFromItemID(ctx context.Context, itemID int) ([]*HQPriceRow, error) {
 	rows, err := p.Db.QueryContext(ctx, `SELECT
 	name,
 	world_name,
@@ -268,14 +253,14 @@ ORDER BY
 		return nil, fmt.Errorf("Postgres error: %s", err)
 	}
 
-	var prices []*PriceRow
+	var prices []*HQPriceRow
 	for rows.Next() {
 		var minPriceHQ, minPriceNQ int
 		var name, worldName string
 		if err := rows.Scan(&name, &worldName, &minPriceHQ, &minPriceNQ); err != nil {
 			return nil, fmt.Errorf("Failed to scan values out of SQL row: %w", err)
 		}
-		prices = append(prices, &PriceRow{
+		prices = append(prices, &HQPriceRow{
 			Name:       name,
 			WorldName:  worldName,
 			MinPriceHQ: minPriceHQ,
@@ -286,7 +271,7 @@ ORDER BY
 }
 
 // Reminder this is case insensitive lookup with UPPER(name) = UPPER(db.name)
-func (p *Postgres) GetItemPricesFromItemName(ctx context.Context, itemName string) ([]*PriceRow, error) {
+func (p *Postgres) GetItemPricesFromItemName(ctx context.Context, itemName string) ([]*HQPriceRow, error) {
 	rows, err := p.Db.QueryContext(ctx, `SELECT
 	name,
 	world_name,
@@ -325,17 +310,121 @@ ORDER BY
 		return nil, fmt.Errorf("Postgres error: %s", err)
 	}
 
-	var prices []*PriceRow
+	var prices []*HQPriceRow
 	for rows.Next() {
 		var minPriceHQ, minPriceNQ int
 		var name, worldName string
 		if err := rows.Scan(&name, &worldName, &minPriceHQ, &minPriceNQ); err != nil {
 			return nil, fmt.Errorf("Failed to scan values out of SQL row: %w", err)
 		}
-		prices = append(prices, &PriceRow{
+		prices = append(prices, &HQPriceRow{
 			Name:       name,
 			WorldName:  worldName,
 			MinPriceHQ: minPriceHQ,
+			MinPriceNQ: minPriceNQ,
+		})
+	}
+	return prices, nil
+}
+
+func (p *Postgres) GetNQItemPricesFromItemName(ctx context.Context, itemName string) ([]*NQPriceRow, error) {
+	rows, err := p.Db.QueryContext(ctx, `SELECT
+	name,
+	world_name,
+	MIN(overall_min_price_nq) AS min_price_nq
+FROM
+(SELECT
+	items.name,
+	price_world.world_name,
+	MIN(price_world.min_price_nq) OVER (PARTITION BY price_world.world_name) AS overall_min_price_nq,
+	rank() OVER (PARTITION BY price_world.update_time ORDER BY price_world.update_time DESC) AS recency_rank
+FROM
+	items RIGHT JOIN (
+		SELECT
+			prices.item_id,
+			worlds.name AS world_name,
+			prices.min_price_nq,
+			prices.update_time
+		FROM
+			prices INNER JOIN worlds USING (world_id)
+		WHERE
+			prices.min_price_nq <> 0
+	) price_world USING (item_id)
+WHERE
+	UPPER(items.name) = UPPER(($1))
+)
+WHERE
+	recency_rank = 1
+GROUP BY
+	name, world_name
+ORDER BY 
+	min_price_nq;`, itemName)
+	if err != nil {
+		return nil, fmt.Errorf("Postgres error: %s", err)
+	}
+
+	var prices []*NQPriceRow
+	for rows.Next() {
+		var minPriceNQ int
+		var name, worldName string
+		if err := rows.Scan(&name, &worldName, &minPriceNQ); err != nil {
+			return nil, fmt.Errorf("Failed to scan values out of SQL row: %w", err)
+		}
+		prices = append(prices, &NQPriceRow{
+			Name:       name,
+			WorldName:  worldName,
+			MinPriceNQ: minPriceNQ,
+		})
+	}
+	return prices, nil
+}
+
+func (p *Postgres) GetNQItemPricesFromItemID(ctx context.Context, itemID int) ([]*NQPriceRow, error) {
+	rows, err := p.Db.QueryContext(ctx, `SELECT
+	name,
+	world_name,
+	MIN(overall_min_price_nq) AS min_price_nq
+FROM
+(SELECT
+	items.name,
+	price_world.world_name,
+	MIN(price_world.min_price_nq) OVER (PARTITION BY price_world.world_name) AS overall_min_price_nq,
+	rank() OVER (PARTITION BY price_world.update_time ORDER BY price_world.update_time DESC) AS recency_rank
+FROM
+	items RIGHT JOIN (
+		SELECT
+			prices.item_id,
+			worlds.name AS world_name,
+			prices.min_price_nq,
+			prices.update_time
+		FROM
+			prices INNER JOIN worlds USING (world_id)
+		WHERE
+			prices.min_price_nq <> 0
+	) price_world USING (item_id)
+WHERE
+	items.item_id = ($1)
+)
+WHERE
+	recency_rank = 1
+GROUP BY
+	name, world_name
+ORDER BY 
+	min_price_nq;`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("Postgres error: %s", err)
+	}
+
+	var prices []*NQPriceRow
+	for rows.Next() {
+		var minPriceNQ int
+		var name, worldName string
+		if err := rows.Scan(&name, &worldName, &minPriceNQ); err != nil {
+			return nil, fmt.Errorf("Failed to scan values out of SQL row: %w", err)
+		}
+		prices = append(prices, &NQPriceRow{
+			Name:       name,
+			WorldName:  worldName,
 			MinPriceNQ: minPriceNQ,
 		})
 	}
