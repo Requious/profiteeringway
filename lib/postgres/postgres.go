@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"profiteeringway/lib/universalis"
 
 	_ "github.com/lib/pq"
@@ -130,10 +131,11 @@ func (p *Postgres) WriteUniversalisPriceData(ctx context.Context, upd *universal
 			p.logger.Warnf("unexpected negative values found: %+v", priceData)
 			continue
 		}
+
 		rows, err := p.Db.QueryContext(ctx, `INSERT INTO prices
 (item_id, world_id, update_time, nq_sale_velocity, hq_sale_velocity, min_price_nq, min_price_hq)
 VALUES ($1, $2, to_timestamp($3::double precision/1000), $4, $5, $6, $7) 
-RETURNING price_id;`, priceData.ItemID, priceData.WorldID, priceData.LastUploadTime, priceData.NqSaleVelocity, priceData.HqSaleVelocity, priceData.MinPriceNQ, priceData.MinPriceHQ)
+RETURNING price_id;`, priceData.ItemID, priceData.WorldID, priceData.LastUploadTime, int(math.Round(priceData.NqSaleVelocity)), int(math.Round(priceData.HqSaleVelocity)), priceData.MinPriceNQ, priceData.MinPriceHQ)
 
 		if err != nil {
 			p.logger.Errorf("failed to write price: %s", err)

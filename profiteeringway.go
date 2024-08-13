@@ -180,6 +180,8 @@ func main() {
 		if err := hub.BeginPollingAll(); err != nil {
 			panic(fmt.Sprintf("%s", err))
 		}
+		sugar.Infow("began polling for hotlists",
+			"hotlists", hotlists)
 	}
 
 	// Discord setup

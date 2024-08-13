@@ -250,6 +250,49 @@ func (dc *Discord) respondTextFile(ctx context.Context, ic *discordgo.Interactio
 	return nil
 }
 
+func (dc *Discord) respondAck(ctx context.Context, ic *discordgo.InteractionCreate) error {
+	icInteraction := interactionFromInteractionCreate(ic)
+	if err := dc.client.InteractionRespond(icInteraction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	}); err != nil {
+		dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to send interaction response"),
+			"suberror", err)
+		return err
+	}
+	return nil
+}
+
+func (dc *Discord) respondFollowup(ctx context.Context, ic *discordgo.InteractionCreate, message string) error {
+	icInteraction := interactionFromInteractionCreate(ic)
+	if _, err := dc.client.FollowupMessageCreate(icInteraction, true, &discordgo.WebhookParams{
+		Content: message,
+	}); err != nil {
+		dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to create followup message"),
+			"suberror", err)
+		return err
+	}
+	return nil
+}
+
+func (dc *Discord) respondFollowupWithFile(ctx context.Context, ic *discordgo.InteractionCreate, message string, text string) error {
+	icInteraction := interactionFromInteractionCreate(ic)
+	if _, err := dc.client.FollowupMessageCreate(icInteraction, true, &discordgo.WebhookParams{
+		Content: message,
+		Files: []*discordgo.File{
+			{
+				Name:        "response.txt",
+				ContentType: "text/plain",
+				Reader:      strings.NewReader(text),
+			},
+		},
+	}); err != nil {
+		dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to create followup message"),
+			"suberror", err)
+		return err
+	}
+	return nil
+}
+
 func (dc *Discord) handleApplicationCommand(ctx context.Context, ic *discordgo.InteractionCreate) {
 	commandData := ic.ApplicationCommandData()
 	switch name := commandData.Name; name {
@@ -409,48 +452,31 @@ func (dc *Discord) handleLookup(ctx context.Context, ic *discordgo.InteractionCr
 		return
 	}
 
-	var hqPriceData []*postgres.HQPriceRow
-	var nqPriceData []*postgres.NQPriceRow
+	// Verified parameters, so ack the message while we compute.
+	dc.respondAck(ctx, ic)
+
 	var err error
+	var priceData []*postgres.AllWorldsPriceRowExpensive
 	if itemID > 0 {
-		hqPriceData, err = dc.pg.GetItemPricesFromItemID(ctx, itemID)
+		priceData, err = dc.pg.GetPriceForItemIDExpensive(ctx, itemID)
 	} else {
-		hqPriceData, err = dc.pg.GetItemPricesFromItemName(ctx, itemName)
+		priceData, err = dc.pg.GetPriceForItemNameExpensive(ctx, itemName)
 	}
 	if err != nil {
 		dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to get item prices"),
 			"command_name", commandData.Name,
 			"database_error", err)
-		dc.respondInstant(ctx, ic, "A database lookup error has occurred. Tell Req to check the logs.")
+		dc.respondFollowup(ctx, ic, "A database lookup error has occurred. Tell Req to check the logs.")
 		return
 	}
 
-	if len(hqPriceData) == 0 {
-		// It's possible this item has no HQ variant, so check the NQ only lookup.
-		if itemID > 0 {
-			nqPriceData, err = dc.pg.GetNQItemPricesFromItemID(ctx, itemID)
-		} else {
-			nqPriceData, err = dc.pg.GetNQItemPricesFromItemName(ctx, itemName)
-		}
-		if err != nil {
-			dc.logger.Errorw(logWithEvent(interactionCreateEventName, "failed to get item prices"),
-				"command_name", commandData.Name,
-				"database_error", err)
-			dc.respondInstant(ctx, ic, "A database lookup error has occurred. Tell Req to check the logs.")
-			return
-		}
-		if len(nqPriceData) == 0 {
-			// Now we're pretty sure the item can't be found.
-			dc.respondInstant(ctx, ic, "No items were found with that lookup.")
-			return
-		}
+	if len(priceData) == 0 {
+		// Now we're pretty sure the item can't be found.
+		dc.respondFollowup(ctx, ic, "No items were found with that lookup.")
+		return
 	}
 
 	var table string
-	if len(hqPriceData) > 0 {
-		itemName, table = tabularPrintHQ(hqPriceData)
-	} else {
-		itemName, table = tabularPrintNQ(nqPriceData)
-	}
-	dc.respondTextFile(ctx, ic, fmt.Sprintf("Price data for %s:", itemName), table)
+	itemName, table = tabularPrintExpensive(priceData)
+	dc.respondFollowupWithFile(ctx, ic, fmt.Sprintf("Price data for %s:", itemName), table)
 }

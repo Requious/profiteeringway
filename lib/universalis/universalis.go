@@ -37,10 +37,10 @@ type UniversalisPriceData struct {
 			Quantity     int  `json:"quantity"`
 			Hq           bool `json:"hq"`
 		} `json:"listings"`
-		NqSaleVelocity int `json:"nqSaleVelocity"`
-		HqSaleVelocity int `json:"hqSaleVelocity"`
-		MinPriceNQ     int `json:"minPriceNQ"`
-		MinPriceHQ     int `json:"minPriceHQ"`
+		NqSaleVelocity float64 `json:"nqSaleVelocity"`
+		HqSaleVelocity float64 `json:"hqSaleVelocity"`
+		MinPriceNQ     int     `json:"minPriceNQ"`
+		MinPriceHQ     int     `json:"minPriceHQ"`
 	} `json:"items"`
 }
 

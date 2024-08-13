@@ -69,6 +69,7 @@ func NewHotlistHub(db *postgres.Postgres, logger *zap.SugaredLogger) *HotlistHub
 					// Ensure resultChan is closed before cleaning up this goroutine.
 					if _, ok := <-resultChan; ok {
 						done = true
+						logger.Infow("received shutdown signal for hub")
 					}
 				}
 			}
@@ -137,6 +138,10 @@ func (h *HotlistHub) BeginPollingAll() error {
 
 					// Reset the timer.
 					fetchSignal = time.After(hotlist.PollFrequency)
+
+					h.logger.Infow("fetch for hotlist resulted in",
+						"hotlist", hotlist.Name,
+						"message", sb.String())
 				case <-stopSignal:
 					done = true
 				}
