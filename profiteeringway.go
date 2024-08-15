@@ -162,6 +162,7 @@ func main() {
 		fmt.Printf("failed to initialize postgres: %v\n", err)
 		return
 	}
+	pg.InitializePriceTables()
 
 	hub := hotlist.NewHotlistHub(pg, sugar)
 
