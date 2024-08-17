@@ -7,18 +7,6 @@ import (
 	"strings"
 )
 
-func (p *Postgres) MateriaPrices(ctx context.Context) ([]*HQPriceRow, error) {
-	return nil, nil
-}
-
-func (p *Postgres) DawntrailTierOneCraftedEquipmentPrices(ctx context.Context) ([]*HQPriceRow, error) {
-	return nil, nil
-}
-
-func (p *Postgres) DawntrailMaterialPrices(ctx context.Context) ([]*HQPriceRow, error) {
-	return nil, nil
-}
-
 func (p *Postgres) GetPricesForItemIDs(ctx context.Context, itemIDs []int) ([]*HQPriceRow, error) {
 	var stringIDs []string
 	for _, itemID := range itemIDs {
@@ -218,4 +206,96 @@ ORDER BY
 	high_quality DESC,
 	datacenter,
 	min_price;`, whereClause)
+}
+
+func recipeDetailsForItemID(itemID string) string {
+	return fmt.Sprintf(`SELECT
+	ing.*,
+	items.name AS crafted_item_name
+FROM (
+SELECT	
+	items.name AS ingredient_name,
+	ingredients.ingredient_id,
+	ingredients.ingredient_count,
+	ingredients.crafted_item_id,
+	ingredients.crafted_item_count AS crafted_quantity
+FROM
+	(SELECT
+		r.crafted_item_id,
+		r.crafted_item_count,
+		r.ingredient_id,
+		r.ingredient_count
+	FROM
+		items
+			LEFT JOIN (
+				SELECT
+					recipes.crafted_item_id,
+					recipes.crafted_item_count,
+					recipe_ingredients.ingredient_id,
+					recipe_ingredients.quantity AS ingredient_count
+				FROM
+					recipes INNER JOIN recipe_ingredients USING (recipe_id)
+			) AS r ON items.item_id = r.crafted_item_id
+		WHERE items.item_id = %v
+	) AS ingredients INNER JOIN items ON ingredients.ingredient_id = items.item_id
+) AS ing INNER JOIN items ON ing.crafted_item_id = items.item_id;
+`, itemID)
+}
+
+type RecipeDetails struct {
+	CraftedItemName string		
+	CraftedItemCount int32
+	CraftedItemID int32
+	Ingredients []*Ingredient
+}
+
+type Ingredient struct {
+	ItemID int32
+	Name string
+	Count int32
+}
+
+func (pg *Postgres) RecipesDetailsForItemID(ctx context.Context, itemID int32) (*RecipeDetails, error) {
+	query := recipeDetailsForItemID("($1)")
+	rows, err := pg.Db.QueryContext(ctx, query, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recipe details for item ID %v: %w", itemID, err)
+	}
+
+	details := &RecipeDetails{}
+	initialized := false
+	for rows.Next() {
+		var craftedItemName, ingredientName string
+		var craftedItemCount, craftedItemID, ingredientItemID, ingredientCount int32
+
+		if err := rows.Scan(&ingredientName, &ingredientItemID, &ingredientCount, &craftedItemID, &craftedItemCount, &craftedItemID, &craftedItemName); err != nil {
+			return nil, fmt.Errorf("failed to scan out values into row: %w", err)
+		}
+
+		if !initialized {
+			details.CraftedItemName = craftedItemName
+			details.CraftedItemCount = craftedItemCount
+			details.CraftedItemID = craftedItemID
+			initialized = true
+		}
+
+		ingredient := &Ingredient {
+			ItemID: ingredientItemID,
+			Name: ingredientName,
+			Count: ingredientCount,
+		}
+
+		details.Ingredients = append(details.Ingredients, ingredient)
+	}
+	return details, nil
+}
+
+func (pg *Postgres) ConvertItemNameToItemID(ctx context.Context, itemName string) (int32, error) {
+	row := pg.Db.QueryRowContext(ctx, `SELECT items.item_id FROM items WHERE items.name = ($1)`, itemName)	
+	var itemID int32
+	if err := row.Scan(&itemID); err != nil {
+		return 0, fmt.Errorf("failed to scan row value for item name lookup: %w", err)
+	}
+
+	return itemID, nil
 }
