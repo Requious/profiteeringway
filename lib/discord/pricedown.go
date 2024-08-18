@@ -120,20 +120,26 @@ func (dc *Discord) handlePricedown(ctx context.Context, ic *discordgo.Interactio
 	resChan := make(chan lookupResult)
 	for _, ing := range recipe.Ingredients {
 		go func(itemID int32, worldID int) {
-			prices, err := dc.pg.GetPriceForItemIDWorldSpecificExpensive(ctx, int(itemID), worldID)
+			prices, err := dc.pg.GetPriceForItemIDWorldSpecificExpensive(ctx, int(itemID), worldName)
 			resChan <- lookupResult{
 				foundPrices: prices,
 				err:         err,
 			}
+			dc.logger.Infow("found prices",
+				"prices", prices,
+				"error", err)
 		}(ing.ItemID, worldID)
 	}
 
 	go func(itemID int32, worldID int) {
-		prices, err := dc.pg.GetPriceForItemIDWorldSpecificExpensive(ctx, int(itemID), worldID)
+		prices, err := dc.pg.GetPriceForItemIDWorldSpecificExpensive(ctx, int(itemID), worldName)
 		resChan <- lookupResult{
 			foundPrices: prices,
 			err:         err,
 		}
+		dc.logger.Infow("found prices",
+			"prices", prices,
+			"error", err)
 	}(int32(itemID), worldID)
 
 	for i := 0; i < waitCount+1; i++ {
@@ -166,6 +172,8 @@ func (dc *Discord) handlePricedown(ctx context.Context, ic *discordgo.Interactio
 			}
 		}
 	}
+	dc.logger.Infow("logged priceMap",
+		"priceMap", priceMap)
 	type pricingRow struct {
 		itemName     string
 		isIngredient bool
@@ -176,7 +184,7 @@ func (dc *Discord) handlePricedown(ctx context.Context, ic *discordgo.Interactio
 		minPriceHQ  int
 		missingInfo bool
 	}
-	var pricingRows []pricingRow
+	var pricingRows []*pricingRow
 
 	targetItemPricingRow := pricingRow{
 		itemName:     recipe.CraftedItemName,
@@ -191,7 +199,7 @@ func (dc *Discord) handlePricedown(ctx context.Context, ic *discordgo.Interactio
 	} else {
 		targetItemPricingRow.missingInfo = true
 	}
-	pricingRows = append(pricingRows, targetItemPricingRow)
+	pricingRows = append(pricingRows, &targetItemPricingRow)
 
 	for _, ing := range recipe.Ingredients {
 		ingPriceRow := pricingRow{
@@ -207,7 +215,14 @@ func (dc *Discord) handlePricedown(ctx context.Context, ic *discordgo.Interactio
 		} else {
 			ingPriceRow.missingInfo = true
 		}
-		pricingRows = append(pricingRows, ingPriceRow)
+		pricingRows = append(pricingRows, &ingPriceRow)
+	}
+
+	// If an item has no data for HQ, we'll fallback NQ prices to HQ (it's possible the item has no HQ variant.)
+	for _, pr := range pricingRows {
+		if pr.minPriceHQ == 0 {
+			pr.minPriceHQ = pr.minPriceNQ
+		}
 	}
 
 	saleTotalHQ := 0
@@ -216,11 +231,11 @@ func (dc *Discord) handlePricedown(ctx context.Context, ic *discordgo.Interactio
 	costTotalNQ := 0
 	for _, pr := range pricingRows {
 		if pr.isIngredient {
-			costTotalHQ += pr.minPriceHQ
-			costTotalNQ += pr.minPriceNQ
+			costTotalHQ += pr.quantity * pr.minPriceHQ
+			costTotalNQ += pr.quantity * pr.minPriceNQ
 		} else {
-			saleTotalHQ += pr.minPriceHQ
-			saleTotalNQ += pr.minPriceNQ
+			saleTotalHQ += pr.quantity * pr.minPriceHQ
+			saleTotalNQ += pr.quantity * pr.minPriceNQ
 		}
 	}
 	t := table.NewWriter()

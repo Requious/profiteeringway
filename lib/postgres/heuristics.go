@@ -107,9 +107,9 @@ func (p *Postgres) GetPriceForItemIDExpensive(ctx context.Context, itemID int) (
 	return prices, nil
 }
 
-func (p *Postgres) GetPriceForItemIDWorldSpecificExpensive(ctx context.Context, itemID int, worldID int) ([]*AllWorldsPriceRowExpensive, error) {
+func (p *Postgres) GetPriceForItemIDWorldSpecificExpensive(ctx context.Context, itemID int, worldName string) ([]*AllWorldsPriceRowExpensive, error) {
 	query := recentAllWorldsPriceQueryExpensive("items.item_id = ($1) AND price_world.world_name = ($2)")
-	rows, err := p.Db.QueryContext(ctx, query, itemID, worldID)
+	rows, err := p.Db.QueryContext(ctx, query, itemID, worldName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get prices for item (expensive query): %w", err)
 	}
@@ -294,7 +294,7 @@ func (pg *Postgres) RecipesDetailsForItemID(ctx context.Context, itemID int32) (
 		var craftedItemName, ingredientName string
 		var craftedItemCount, craftedItemID, ingredientItemID, ingredientCount int32
 
-		if err := rows.Scan(&ingredientName, &ingredientItemID, &ingredientCount, &craftedItemID, &craftedItemCount, &craftedItemID, &craftedItemName); err != nil {
+		if err := rows.Scan(&ingredientName, &ingredientItemID, &ingredientCount, &craftedItemID, &craftedItemCount, &craftedItemName); err != nil {
 			return nil, fmt.Errorf("failed to scan out values into row: %w", err)
 		}
 

@@ -298,6 +298,8 @@ func (dc *Discord) handleApplicationCommand(ctx context.Context, ic *discordgo.I
 	switch name := commandData.Name; name {
 	case COMMAND_LOOKUP:
 		dc.handleLookup(ctx, ic)
+	case COMMAND_PRICEDOWN:
+		dc.handlePricedown(ctx, ic)
 	default:
 		dc.logger.Warnw(logWithEvent(interactionCreateEventName, "unexpected command received"),
 			"command_name", name)
