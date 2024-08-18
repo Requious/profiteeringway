@@ -107,6 +107,32 @@ func (p *Postgres) GetPriceForItemIDExpensive(ctx context.Context, itemID int) (
 	return prices, nil
 }
 
+func (p *Postgres) GetPriceForItemIDWorldSpecificExpensive(ctx context.Context, itemID int, worldID int) ([]*AllWorldsPriceRowExpensive, error) {
+	query := recentAllWorldsPriceQueryExpensive("items.item_id = ($1) AND price_world.world_name = ($2)")
+	rows, err := p.Db.QueryContext(ctx, query, itemID, worldID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get prices for item (expensive query): %w", err)
+	}
+
+	var prices []*AllWorldsPriceRowExpensive
+	for rows.Next() {
+		var name, worldName, datacenter string
+		var minPrice int
+		var highQuality bool
+		if err := rows.Scan(&name, &worldName, &datacenter, &minPrice, &highQuality); err != nil {
+			return nil, fmt.Errorf("failed to scan out values into row: %w", err)
+		}
+		prices = append(prices, &AllWorldsPriceRowExpensive{
+			Name:        name,
+			WorldName:   worldName,
+			Datacenter:  datacenter,
+			MinPrice:    minPrice,
+			HighQuality: highQuality,
+		})
+	}
+
+	return prices, nil
+}
 func (p *Postgres) GetPriceForItemNameExpensive(ctx context.Context, itemName string) ([]*AllWorldsPriceRowExpensive, error) {
 	query := recentAllWorldsPriceQueryExpensive("UPPER(items.name) = UPPER(($1))")
 	rows, err := p.Db.QueryContext(ctx, query, itemName)
@@ -243,16 +269,16 @@ FROM
 }
 
 type RecipeDetails struct {
-	CraftedItemName string		
+	CraftedItemName  string
 	CraftedItemCount int32
-	CraftedItemID int32
-	Ingredients []*Ingredient
+	CraftedItemID    int32
+	Ingredients      []*Ingredient
 }
 
 type Ingredient struct {
 	ItemID int32
-	Name string
-	Count int32
+	Name   string
+	Count  int32
 }
 
 func (pg *Postgres) RecipesDetailsForItemID(ctx context.Context, itemID int32) (*RecipeDetails, error) {
@@ -279,10 +305,10 @@ func (pg *Postgres) RecipesDetailsForItemID(ctx context.Context, itemID int32) (
 			initialized = true
 		}
 
-		ingredient := &Ingredient {
+		ingredient := &Ingredient{
 			ItemID: ingredientItemID,
-			Name: ingredientName,
-			Count: ingredientCount,
+			Name:   ingredientName,
+			Count:  ingredientCount,
 		}
 
 		details.Ingredients = append(details.Ingredients, ingredient)
@@ -291,11 +317,27 @@ func (pg *Postgres) RecipesDetailsForItemID(ctx context.Context, itemID int32) (
 }
 
 func (pg *Postgres) ConvertItemNameToItemID(ctx context.Context, itemName string) (int32, error) {
-	row := pg.Db.QueryRowContext(ctx, `SELECT items.item_id FROM items WHERE items.name = ($1)`, itemName)	
+	row := pg.Db.QueryRowContext(ctx, `SELECT items.item_id FROM items WHERE items.name = ($1)`, itemName)
 	var itemID int32
 	if err := row.Scan(&itemID); err != nil {
 		return 0, fmt.Errorf("failed to scan row value for item name lookup: %w", err)
 	}
 
 	return itemID, nil
+}
+
+func (pg *Postgres) WorldIDFromWorldName(ctx context.Context, worldName string) (int, error) {
+	query := `SELECT
+		world_id
+	FROM
+		worlds
+	WHERE
+		name = ($1)`
+
+	row := pg.Db.QueryRowContext(ctx, query, worldName)
+	var worldID int
+	if err := row.Scan(&worldID); err != nil {
+		return 0, fmt.Errorf("failed to get world ID for world: %s: %w", worldName, err)
+	}
+	return worldID, nil
 }

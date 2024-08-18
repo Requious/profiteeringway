@@ -14,7 +14,7 @@ import (
 const (
 	interactionCreateEventName string = "INTERACTION_CREATE"
 	COMMAND_LOOKUP             string = "lookup"
-	COMMAND_PRICEDOWN string = "pricedown"
+	COMMAND_PRICEDOWN          string = "pricedown"
 )
 
 type Discord struct {
@@ -307,6 +307,6 @@ func (dc *Discord) handleApplicationCommand(ctx context.Context, ic *discordgo.I
 func AllCommands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{
 		CommandLookup(),
+		CommandPricedown(),
 	}
 }
-
